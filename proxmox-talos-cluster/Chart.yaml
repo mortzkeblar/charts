@@ -4,9 +4,15 @@ description: >-
   Kubernetes cluster running Talos Linux on Proxmox VE, declared through
   Cluster API (CAPMOX infrastructure + Talos bootstrap and control plane providers).
 type: application
-version: 0.2.0
+version: 0.1.0
 # Default Kubernetes version deployed by the chart (cluster.kubernetesVersion)
 appVersion: "1.36.0"
+home: https://github.com/mortzkeblar/charts/tree/main/proxmox-talos-cluster
+sources:
+  - https://github.com/mortzkeblar/charts
+maintainers:
+  - name: mortzkeblar
+    url: https://github.com/mortzkeblar
 keywords:
   - cluster-api
   - capi
@@ -14,3 +20,5 @@ keywords:
   - proxmox
   - talos
   - kubernetes
+annotations:
+  artifacthub.io/license: Apache-2.0

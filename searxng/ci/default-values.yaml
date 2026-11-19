@@ -1,0 +1,7 @@
+# Used by CI: install on kind with the bundled Valkey and NetworkPolicies
+secret:
+  value: ci-only-not-a-secret
+valkey:
+  enabled: true
+networkPolicy:
+  enabled: true

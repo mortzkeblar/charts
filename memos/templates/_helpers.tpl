@@ -63,6 +63,13 @@ Create the name of the service account to use
 
 
 {{/*
+Port memos listens on inside the container (independent from service.port).
+*/}}
+{{- define "memos.containerPort" -}}
+5230
+{{- end }}
+
+{{/*
 Render the container env list. Secret-backed vars from
 .Values.config.secretEnv are referenced via secretKeyRef against the
 chart's Secret; plain vars from .Values.config.env are set inline.

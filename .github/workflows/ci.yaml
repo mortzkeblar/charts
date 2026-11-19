@@ -1,0 +1,43 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: azure/setup-helm@v4
+        with:
+          version: v4.2.2
+      - name: Lint and render charts
+        run: scripts/lint.sh
+
+  install:
+    # Installs the charts that can run on a plain cluster. proxmox-talos-cluster
+    # needs Cluster API and a Proxmox host, so it is only rendered in `lint`.
+    needs: lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: azure/setup-helm@v4
+        with:
+          version: v4.2.2
+      - uses: helm/kind-action@v1
+      - name: Install searxng under Pod Security "restricted"
+        run: |
+          kubectl create namespace searxng
+          kubectl label namespace searxng pod-security.kubernetes.io/enforce=restricted
+          helm repo add valkey https://valkey.io/valkey-helm/
+          helm dependency build searxng
+          helm install searxng ./searxng -n searxng -f searxng/ci/default-values.yaml --wait --timeout 5m
+          helm test searxng -n searxng --logs
+      - name: Show pods on failure
+        if: failure()
+        run: kubectl get pods,events -n searxng -o wide

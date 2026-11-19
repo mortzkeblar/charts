@@ -2,3 +2,4 @@
 */charts/*.tgz
 # Paquetes generados por helm package
 *.tgz
+.release/

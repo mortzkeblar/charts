@@ -31,7 +31,8 @@ Plus a Proxmox VM template with a Talos nocloud image, ideally built with the
 ## Usage
 
 ```bash
-helm install my-cluster ./proxmox-talos-cluster -n clusters --create-namespace -f my-values.yaml
+helm install my-cluster oci://ghcr.io/mortzkeblar/charts/proxmox-talos-cluster \
+  --version 0.1.0 -n clusters --create-namespace -f my-values.yaml
 ```
 
 Minimum values:

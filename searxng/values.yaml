@@ -148,21 +148,20 @@ ingress:
 
 gateway:
   # -- Create a Gateway API `HTTPRoute` (instead of, or alongside, `ingress`).
-  enabled: true
+  enabled: false
   # -- Extra labels on the HTTPRoute.
   labels: {}
   # -- Extra annotations on the HTTPRoute.
-  annotations:
-    external-dns.alpha.kubernetes.io/enabled: "true"
+  annotations: {}
   # -- `parentRefs` for the HTTPRoute (which Gateway(s) it attaches to).
   parentRefs:
     - group: gateway.networking.k8s.io
       kind: Gateway
-      name: private-gateway
-      namespace: gateways
-  # -- Hostnames matched by the HTTPRoute.
-  hostnames:
-    - searxng.lab.layqavoid.com
+      name: gateway
+      # namespace: gateway-system
+      # sectionName: https
+  # -- Hostnames matched by the HTTPRoute, e.g. [search.example.com].
+  hostnames: []
   # -- Route matches, forwarded to the single backendRef.
   matches:
     - path:
@@ -170,6 +169,35 @@ gateway:
         value: /
   # -- Route filters (redirects, header modifiers, etc.).
   filters: []
+
+networkPolicy:
+  # -- Create NetworkPolicies for SearXNG and, when `valkey.enabled`, for the
+  # bundled Valkey (which then only accepts connections from SearXNG).
+  enabled: false
+  # -- Peers allowed to reach SearXNG on its HTTP port (NetworkPolicyPeer
+  # list), e.g. the namespace of your ingress controller or Gateway. Empty
+  # allows any source.
+  ingressFrom: []
+  #  - namespaceSelector:
+  #      matchLabels:
+  #        kubernetes.io/metadata.name: gateway-system
+  egress:
+    # -- Restrict SearXNG's outgoing traffic. SearXNG queries search engines
+    # on the internet, so with this enabled you must allow them in `rules`
+    # (e.g. `0.0.0.0/0` on 443 minus private ranges).
+    enabled: false
+    # -- Allow DNS to kube-dns when egress is restricted.
+    allowDNS: true
+    # -- Extra egress rules (NetworkPolicyEgressRule list). Traffic to the
+    # bundled Valkey is allowed automatically.
+    rules: []
+    #  - to:
+    #      - ipBlock:
+    #          cidr: 0.0.0.0/0
+    #          except: [10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16]
+    #    ports:
+    #      - port: 443
+    #        protocol: TCP
 
 resources:
   # -- Minimum resources requested for the `searxng` container.

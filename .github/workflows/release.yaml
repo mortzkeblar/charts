@@ -1,0 +1,31 @@
+name: Release
+
+# Publishes every chart in charts.txt whose Chart.yaml version is not in the
+# registry yet. To release a chart, bump its version and merge to main.
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  packages: write   # push charts to ghcr.io
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: azure/setup-helm@v4
+        with:
+          version: v4.2.2
+      - name: Log in to ghcr.io
+        run: echo "${{ secrets.GITHUB_TOKEN }}" | helm registry login ghcr.io -u "${{ github.actor }}" --password-stdin
+      - name: Lint
+        run: scripts/lint.sh
+      - name: Package and push
+        run: REGISTRY="oci://ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/charts" scripts/release.sh

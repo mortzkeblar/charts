@@ -1,0 +1,22 @@
+searxng Helm chart
+Copyright the contributors of this fork.
+
+This product is a derivative work of the "searxng" Helm chart from
+techpipe-io/searxng-helm-chart (https://github.com/techpipe-io/searxng-helm-chart),
+Copyright (c) its original author, licensed under the Apache License,
+Version 2.0. See LICENSE for the full license text.
+
+Changes made in this fork are described in the "Fork" section of README.md.
+Templates modified from the original carry a comment header noting the
+alteration, as required by Apache License 2.0 section 4(b).
+
+---
+
+This chart declares "valkey" (https://github.com/valkey-io/valkey-helm) as a
+Helm chart dependency. That chart is licensed under the BSD 3-Clause License,
+Copyright (c) 2025, Raven — a different license from this chart's Apache
+License 2.0. Its terms apply to that dependency independently of this NOTICE.
+
+If the valkey chart's packaged .tgz is ever vendored into charts/ in this
+repository, its own copyright notice travels inside that archive, satisfying
+the BSD-3-Clause attribution requirement without further action here.

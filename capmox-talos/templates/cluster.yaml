@@ -1,0 +1,21 @@
+apiVersion: cluster.x-k8s.io/v1beta2
+kind: Cluster
+metadata:
+  name: {{ include "capmox-talos.fullname" . }}
+  labels: 
+    {{- include "capmox-talos.labels" . | nindent 4 }}
+  namespace: {{ .Release.Namespace }}
+spec:
+  clusterNetwork:
+    pods:
+      cidrBlocks:
+        {{- toYaml .Values.cluster.network.pods.cidrBlocks | nindent 8 }}
+  controlPlaneRef:
+    apiGroup: controlplane.cluster.x-k8s.io
+    kind: TalosControlPlane
+    name: {{ include "capmox-talos.fullname" . }}-control-plane
+  infrastructureRef:
+    apiGroup: infrastructure.cluster.x-k8s.io
+    kind: ProxmoxCluster
+    name: {{ include "capmox-talos.fullname" . }}
+

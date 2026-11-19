@@ -1,0 +1,31 @@
+{{/* Altered from techpipe-io/searxng-helm-chart: added pod/container securityContext
+     (reusing the Deployment's own values), automountServiceAccountToken: false,
+     resources, and switched the wget target from / to /healthz. */}}
+{{- if .Values.testConnection.enabled }}
+apiVersion: v1
+kind: Pod
+metadata:
+  name: {{ include "searxng.fullname" . }}-test
+  labels:
+    {{- include "searxng.labels" . | nindent 4 }}
+  annotations:
+    "helm.sh/hook": test
+    "helm.sh/hook-delete-policy": before-hook-creation,hook-succeeded
+spec:
+  restartPolicy: Never
+  automountServiceAccountToken: false
+  securityContext:
+    {{- toYaml .Values.podSecurityContext | nindent 4 }}
+  containers:
+    - name: wget
+      image: {{ .Values.testConnection.image.repository }}:{{ .Values.testConnection.image.tag }}
+      imagePullPolicy: {{ .Values.testConnection.image.pullPolicy }}
+      securityContext:
+        {{- toYaml .Values.securityContext | nindent 8 }}
+      resources:
+        {{- toYaml .Values.testConnection.resources | nindent 8 }}
+      command:
+        - sh
+        - -ec
+        - wget -qO- http://{{ include "searxng.fullname" . }}:{{ .Values.service.port }}/healthz >/dev/null
+{{- end }}

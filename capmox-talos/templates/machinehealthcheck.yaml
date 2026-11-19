@@ -1,0 +1,29 @@
+{{- range $pool := .Values.workers.pools }}
+---
+apiVersion: cluster.x-k8s.io/v1beta2
+kind: MachineHealthCheck
+metadata:
+  name: {{ include "capmox-talos.fullname" $ }}-{{ $pool.name }}-mhc
+  namespace: {{ $.Release.Namespace }}
+  labels:
+    {{- include "capmox-talos.labels" $ | nindent 4 }}
+spec:
+  clusterName: {{ include "capmox-talos.clusterName" $ }}
+  selector:
+    matchLabels:
+      cluster.x-k8s.io/cluster-name: {{ include "capmox-talos.clusterName" $ }}
+      capmox-talos.io/pool: {{ $pool.name }}
+  remediation:
+    triggerIf:
+      unhealthyInRange: "[1-{{ max 1 (sub $pool.replicas 1) }}]"
+  checks:
+    nodeStartupTimeoutSeconds: {{ dig "healthCheck" "nodeStartupTimeoutSeconds" 360 $pool }}
+    unhealthyNodeConditions:
+      - type: Ready
+        status: Unknown
+        timeoutSeconds: 150
+      - type: Ready
+        status: "False"
+        timeoutSeconds: 150
+{{- end }}
+

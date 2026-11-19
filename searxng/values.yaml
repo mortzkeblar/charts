@@ -1,0 +1,594 @@
+# -- Override the chart name used in generated resource names.
+nameOverride: ""
+# -- Override the full generated resource name (skips the `release-chart` pattern).
+fullnameOverride: ""
+# -- Labels applied to every resource this chart creates.
+commonLabels: {}
+
+global:
+  # -- Image pull secrets. Deliberately under `global` (rather than a
+  # chart-local key) so Helm's built-in global-value propagation hands the
+  # same list to the `valkey` subchart automatically — it reads
+  # `global.imagePullSecrets` itself. Single source of truth for both.
+  imagePullSecrets: []
+
+image:
+  # -- Repository of the SearXNG image, registry included.
+  repository: docker.io/searxng/searxng
+  # -- Image tag. Empty string falls back to `.Chart.AppVersion`.
+  tag: ""
+  # -- Image pull policy.
+  # @schema enum:[Always, IfNotPresent, Never]
+  pullPolicy: IfNotPresent
+
+initContainer:
+  # -- Image for the `init-config` initContainer. Deliberately separate from
+  # `testConnection.image`: that one is only for the `helm test` Pod, and
+  # `testConnection.enabled: false` must not remove a load-bearing image from
+  # the pod's startup path.
+  image:
+    repository: docker.io/library/busybox
+    tag: "1.36"
+    pullPolicy: IfNotPresent
+  # -- Minimum resources for `init-config`, needed under a LimitRange or a
+  # Kyverno policy that requires requests on every container.
+  resources:
+    requests:
+      cpu: 10m
+      memory: 16Mi
+
+# -- Number of SearXNG replicas.
+# @schema type:integer;minimum:1
+replicaCount: 1
+# -- Number of old ReplicaSets to retain.
+# @schema type:integer;minimum:0
+revisionHistoryLimit: 3
+
+# -- Extra annotations on the Deployment object itself.
+deploymentAnnotations: {}
+# -- Extra annotations on the pod template.
+podAnnotations: {}
+# -- Extra labels on the pod template.
+podLabels: {}
+
+strategy:
+  # -- Deployment update strategy. Safe to leave as `RollingUpdate` since every
+  # volume this chart mounts is an emptyDir, not a shared/exclusive PVC.
+  # @schema enum:[RollingUpdate, Recreate]
+  type: RollingUpdate
+
+serviceAccount:
+  # -- Create a ServiceAccount for the pod.
+  create: true
+  # -- Annotations for the created ServiceAccount.
+  annotations: {}
+  # -- Name of the ServiceAccount to use. Defaults to the fullname when `create` is true.
+  name: ""
+
+# -- SearXNG never talks to the Kubernetes API, so the token is never mounted.
+automountServiceAccountToken: false
+
+podSecurityContext:
+  # -- Group that owns every emptyDir volume mounted by this chart, must match the
+  # image's runtime UID/GID (977, verified against searxng/base's Dockerfile).
+  # @schema type:integer
+  fsGroup: 977
+  seccompProfile:
+    # -- Seccomp profile type, required by Pod Security Standards `restricted`.
+    type: RuntimeDefault
+
+securityContext:
+  # -- Disable privilege escalation, required by PSS `restricted`.
+  allowPrivilegeEscalation: false
+  capabilities:
+    # -- Drop all Linux capabilities, required by PSS `restricted`.
+    drop:
+      - ALL
+  # -- Refuse to run as root, required by PSS `restricted`.
+  runAsNonRoot: true
+  # -- UID the `searxng` container runs as. Matches the image's built-in `searxng`
+  # user (977). Verified against searxng/base's Dockerfile
+  # (`searxng:x:977:977`); update this only if a future image build changes it.
+  # @schema type:integer
+  runAsUser: 977
+  # -- GID the `searxng` container runs as. See `runAsUser` above.
+  # @schema type:integer
+  runAsGroup: 977
+  seccompProfile:
+    type: RuntimeDefault
+  # -- Requires `/tmp`, `/etc/searxng`, `/var/cache/searxng` to be writable
+  # volumes (already the case, see the `persistence`-free emptyDir volumes
+  # wired in the Deployment).
+  readOnlyRootFilesystem: true
+
+# -- Security context for the `init-config` initContainer. Kept independent
+# from `securityContext` because initContainers don't inherit the main
+# container's security context.
+initContainerSecurityContext:
+  allowPrivilegeEscalation: false
+  capabilities:
+    drop:
+      - ALL
+  runAsNonRoot: true
+  runAsUser: 977
+  runAsGroup: 977
+  seccompProfile:
+    type: RuntimeDefault
+  readOnlyRootFilesystem: true
+
+service:
+  # -- Kubernetes Service type.
+  # @schema enum:[ClusterIP, NodePort, LoadBalancer]
+  type: ClusterIP
+  # -- Service port.
+  # @schema type:integer
+  port: 8080
+  # -- Extra annotations on the Service.
+  annotations: {}
+  # -- Restrict the Service to specific IP families (e.g. `[IPv4]`, `[IPv6]`).
+  ipFamilies: []
+  # -- IP family policy for the Service.
+  ipFamilyPolicy: ""
+  # -- Session affinity for the Service.
+  # @schema enum:[None, ClientIP]
+  sessionAffinity: None
+
+ingress:
+  # -- Create an Ingress resource.
+  enabled: false
+  # -- IngressClass name.
+  className: ""
+  # -- Extra annotations on the Ingress.
+  annotations: {}
+  # -- Ingress hosts and paths. Empty by default — set explicitly when
+  # enabling ingress, there is no usable placeholder host.
+  hosts: []
+  # -- TLS configuration for the Ingress.
+  tls: []
+
+gateway:
+  # -- Create a Gateway API `HTTPRoute` (instead of, or alongside, `ingress`).
+  enabled: true
+  # -- Extra labels on the HTTPRoute.
+  labels: {}
+  # -- Extra annotations on the HTTPRoute.
+  annotations:
+    external-dns.alpha.kubernetes.io/enabled: "true"
+  # -- `parentRefs` for the HTTPRoute (which Gateway(s) it attaches to).
+  parentRefs:
+    - group: gateway.networking.k8s.io
+      kind: Gateway
+      name: private-gateway
+      namespace: gateways
+  # -- Hostnames matched by the HTTPRoute.
+  hostnames:
+    - searxng.lab.layqavoid.com
+  # -- Route matches, forwarded to the single backendRef.
+  matches:
+    - path:
+        type: PathPrefix
+        value: /
+  # -- Route filters (redirects, header modifiers, etc.).
+  filters: []
+
+resources:
+  # -- Minimum resources requested for the `searxng` container.
+  requests:
+    cpu: 100m
+    memory: 256Mi
+  # -- Resource ceilings for the `searxng` container. Add `ephemeral-storage`
+  # here to bound the size of the emptyDir volumes (`config-runtime`, `cache`,
+  # `tmp`), since none of them are individually size-limited anymore.
+  limits:
+    memory: 1Gi
+
+# -- Node selector for the pod.
+nodeSelector: {}
+# -- Tolerations for the pod.
+tolerations: []
+# -- Affinity rules for the pod.
+affinity: {}
+# -- Topology spread constraints for the pod.
+topologySpreadConstraints: []
+# -- PriorityClass name for the pod.
+priorityClassName: ""
+# -- Grace period before the pod is force-killed.
+# @schema type:integer;minimum:0
+terminationGracePeriodSeconds: 30
+# -- Extra `/etc/hosts` entries for the pod.
+hostAliases: []
+
+env:
+  # -- Extra plain environment variables (`SEARXNG_*`, `GRANIAN_*`, etc.).
+  values: {}
+  # -- Extra secret environment variables (`SEARXNG_*`, `GRANIAN_*`, etc.),
+  # written into the generated runtime Secret.
+  secretValues: {}
+  # -- Names of existing Secrets to load via `envFrom`.
+  existingSecrets: []
+  # -- Names of existing ConfigMaps to load via `envFrom`.
+  existingConfigMaps: []
+
+secret:
+  # -- Generate a `SEARXNG_SECRET` at render time. Default `false`: exactly one
+  # of `existingSecret`, `value`, or `create: true` must be configured, or the
+  # render fails with a guidance message — this chart never silently invents a
+  # secret. Setting `create: true` without `value` falls back to a random
+  # value regenerated on every `helm template`/`helm install`: that output is
+  # NOT deterministic (two renders of the same values differ), which breaks
+  # GitOps tools that diff rendered manifests (e.g. ArgoCD shows permanent
+  # OutOfSync and rotates the pod on every sync) and invalidates sessions/
+  # limiter tokens on every rollout. Prefer `existingSecret` or `value` for
+  # anything GitOps-managed.
+  create: false
+  # -- Name of an existing Secret holding `SEARXNG_SECRET`, skips generation.
+  existingSecret: ""
+  # -- Key inside `existingSecret` holding the value of `SEARXNG_SECRET`.
+  existingSecretKey: SEARXNG_SECRET
+  # -- Literal value for `SEARXNG_SECRET`. Deterministic output; still ends up
+  # in a generated Secret (not inline in the Deployment), but is plaintext in
+  # your values file unless you pipe it through Helm secrets/SOPS/sealed-secrets.
+  value: ""
+
+config:
+  # -- Start `settings.yml` from SearXNG's built-in defaults (`use_default_settings: true`).
+  useDefaultSettings: true
+  settings:
+    plugins: 
+      searx.plugins.hostnames.SXNGPlugin:
+        active: true
+    hostnames:
+      remove: 'hostnames-remove.yml'
+      low_priority: 'hostnames-low.yml'
+      high_priority: 'hostnames-high.yml'
+    general:
+      debug: false
+      instance_name: SearXNG
+      # -- /stats and /stats/errors expose which engines you use, error rates,
+      # and timings on the same public listener. Off by default; turn on only
+      # if you're actually scraping it (e.g. from an internal Prometheus).
+      enable_metrics: false
+      open_metrics: ""
+    server:
+      # -- Empty string means SearXNG autodetects scheme/host/path from
+      # standard reverse-proxy headers (X-Forwarded-Proto, X-Forwarded-Host,
+      # X-Script-Name) via its ReverseProxyPathFix WSGI middleware
+      # (searx/flaskfix.py) — correct behind an Ingress/Gateway. Only set
+      # this explicitly if your proxy doesn't send those headers, or you rely
+      # on absolute-URL generation (OpenSearch, redirects, image_proxy)
+      # matching one specific external hostname regardless of the request.
+      base_url: ""
+      # -- Enables SearXNG's rate limiter, which requires a Valkey backend
+      # (`valkey.enabled` or `externalValkey.*`) — SearXNG itself will not
+      # start correctly without one if this is on; this chart does not check
+      # that for you.
+      limiter: true
+      public_instance: false
+      image_proxy: true
+      method: GET
+      search:
+        formats:
+          - html
+          - json
+    # -- Extra engine overrides, appended as-is to `settings.yml`.
+    engines:
+      # Generales — índice propio, no bloquean
+      - name: mojeek
+        disabled: false
+        weight: 1.3
+      - name: marginalia
+        disabled: false
+        weight: 1.2
+
+      # Rotos por anti-bot / markup
+      - name: brave
+        disabled: true
+      - name: startpage
+        disabled: true
+      - name: bing
+        disabled: true
+
+      # API-backed, para tu perfil
+      - name: hackernews
+        disabled: false
+      - name: stackoverflow
+        disabled: false
+        weight: 1.5
+      - name: askubuntu
+        disabled: false
+      - name: superuser
+        disabled: false
+      - name: serverfault
+        disabled: false
+      - name: github
+        disabled: false
+      - name: arch linux wiki
+        disabled: false
+      - name: docker hub
+        disabled: false
+      - name: pypi
+        disabled: false
+      - name: crates.io
+        disabled: false
+      - name: arxiv
+        disabled: false
+
+    outgoing:
+      request_timeout: 2.5
+      max_request_timeout: 5.0
+
+  # -- Extra non-secret files mounted into `/etc/searxng` (e.g. `limiter.toml`).
+  files:
+    hostnames-remove.yml: |
+      # Scrapers de StackOverflow / GitHub — contenido robado, cero original
+      - '(.*\.)?githubplus\.com$'
+      - '(.*\.)?giters\.com$'
+      - '(.*\.)?coder\.social$'
+      - '(.*\.)?issuehint\.com$'
+      - '(.*\.)?geekrepos\.com$'
+      - '(.*\.)?bleepcoder\.com$'
+      - '(.*\.)?9to5answer\.com$'
+      - '(.*\.)?solveforum\.com$'
+      - '(.*\.)?appsloveworld\.com$'
+      - '(.*\.)?codegrepper\.com$'
+      - '(.*\.)?newbedev\.com$'
+      - '(.*\.)?lightrun\.com$'
+      - '(.*\.)?programcreek\.com$'
+      - '(.*\.)?csdn\.net$'
+      - '(.*\.)?kknews\.cc$'
+      - '(.*\.)?otosection\.com$'
+      - '(.*\.)?drivereasy\.com$'
+      # Content mills técnicos generados para SEO
+      - '(.*\.)?educba\.com$'
+      - '(.*\.)?tutorialspoint\.com$'
+      - '(.*\.)?javatpoint\.com$'
+      - '(.*\.)?w3schools\.com$'
+      # Sin contenido detrás del resultado
+      - '(.*\.)?pinterest\.[a-z.]+$'
+      - '(.*\.)?quora\.com$'
+      # Login wall: el resultado nunca es legible sin cuenta
+      - '(.*\.)?facebook\.com$'
+      - '(.*\.)?instagram\.com$'
+      - '(.*\.)?tiktok\.com$'
+      - '(.*\.)?twitter\.com$'
+      - '(.*\.)?x\.com$'
+      - '(.*\.)?linkedin\.com$'
+
+    hostnames-low.yml: |
+      # Republicación / clickbait
+      - '(.*\.)?msn\.com$'
+      - '(.*\.)?dailymail\.co\.uk$'
+      - '(.*\.)?forbes\.com$'
+      - '(.*\.)?makeuseof\.com$'
+      - '(.*\.)?ign\.com$'
+      # Salud SEO por encima de fuentes primarias
+      - '(.*\.)?healthline\.com$'
+      - '(.*\.)?webmd\.com$'
+      # Calidad despareja / paywall
+      - '(.*\.)?medium\.com$'
+      - '(.*\.)?towardsdatascience\.com$'
+      - '(.*\.)?wikihow\.com$'
+      - '(.*\.)?geeksforgeeks\.org$'
+      - '(.*\.)?fandom\.com$'
+      - '(.*\.)?libhunt\.com$'
+      - '(.*\.)?answers\.microsoft\.com$'
+      - '(.*\.)?sourceforge\.net$'
+      - '(.*\.)?freecodecamp\.org$'
+      # Shopping contaminando queries informativas
+      - '(.*\.)?amazon\.[a-z.]+$'
+      - '(.*\.)?etsy\.com$'
+      - '(.*\.)?play\.google\.com$'
+
+    hostnames-high.yml: |
+      # Q&A técnico
+      - '(.*\.)?stackoverflow\.com$'
+      - '(.*\.)?stackexchange\.com$'
+      - '(.*\.)?superuser\.com$'
+      - '(.*\.)?serverfault\.com$'
+      - '(.*\.)?askubuntu\.com$'
+      - '(.*\.)?news\.ycombinator\.com$'
+      - '(.*\.)?reddit\.com$'
+      # Código
+      - '(.*\.)?github\.com$'
+      - '(.*\.)?gitlab\.com$'
+      # Referencia general
+      - '(.*\.)?wikipedia\.org$'
+      - '(.*\.)?wiktionary\.org$'
+      - '(.*\.)?archive\.org$'
+      - '(.*\.)?merriam-webster\.com$'
+      # Documentación oficial
+      - '(.*\.)?developer\.mozilla\.org$'
+      - '(.*\.)?docs\.python\.org$'
+      - '(.*\.)?doc\.rust-lang\.org$'
+      - '(.*\.)?docs\.rs$'
+      - '(.*\.)?pkg\.go\.dev$'
+      - '(.*\.)?en\.cppreference\.com$'
+      - '(.*\.)?postgresql\.org$'
+      - '(.*\.)?kubernetes\.io$'
+      - '(.*\.)?docs\.docker\.com$'
+      - '(.*\.)?registry\.terraform\.io$'
+      - '(.*\.)?docs\.aws\.amazon\.com$'
+      - '(.*\.)?learn\.microsoft\.com$'
+      - '(.*\.)?developer\.apple\.com$'
+      - '(.*\.)?man7\.org$'
+      - '(.*\.)?css-tricks\.com$'
+      # Wikis de distro
+      - '(.*\.)?wiki\.archlinux\.org$'
+      - '(.*\.)?wiki\.nixos\.org$'
+      - '(.*\.)?wiki\.debian\.org$'
+      - '(.*\.)?lwn\.net$'
+      # Protocolos / estándares — no está en la lista de Kagi, va por tu perfil
+      - '(.*\.)?rfc-editor\.org$'
+      - '(.*\.)?datatracker\.ietf\.org$'
+      # Ciencia y salud, fuentes primarias
+      - '(.*\.)?arxiv\.org$'
+      - '(.*\.)?ncbi\.nlm\.nih\.gov$'
+      - '(.*\.)?mayoclinic\.org$'
+      - '(.*\.)?nhs\.uk$'
+      # Cultura / media — sacalos si no buscás esto
+      - '(.*\.)?imdb\.com$'
+      - '(.*\.)?letterboxd\.com$'
+      - '(.*\.)?rottentomatoes\.com$'
+      - '(.*\.)?metacritic\.com$'
+      - '(.*\.)?themoviedb\.org$'
+      - '(.*\.)?goodreads\.com$'
+      - '(.*\.)?myanimelist\.net$'
+      - '(.*\.)?anilist\.co$'
+      - '(.*\.)?store\.steampowered\.com$'
+      - '(.*\.)?rtings\.com$'
+      - '(.*\.)?seriouseats\.com$'
+      - '(.*\.)?minecraft\.wiki$'
+    limiter.toml: |
+      [real_ip]
+      # Cuántos hops de X-Forwarded-For descontar para sacar la IP real.
+      # Detrás de Envoy Gateway esto NO es opcional: sin ajustarlo, todas
+      # las requests parecen venir del gateway y el rate limit aplica al
+      # cluster entero como si fuera un solo cliente.
+      x_for = 1
+      ipv4_prefix = 32
+      ipv6_prefix = 48
+
+      [botdetection]
+      trusted_proxies = ["10.244.0.0/16"]   # CIDR de tus pods (donde vive Envoy)
+      ipv4_prefix = 32
+      ipv6_prefix = 48
+
+      [botdetection.ip_limit]
+      link_token = false
+
+      [botdetection.ip_lists]
+      pass_ip = ["10.0.0.0/8"]   # nodos + pods, para que las probes no molesten
+      block_ip = []
+
+  # -- Extra secret files mounted into `/etc/searxng`. If
+  # `secretFiles["settings.yml"]` is set, it replaces the generated one.
+  secretFiles: {}
+
+# All persistent-looking paths (/etc/searxng, /var/cache/searxng, /tmp) are
+# plain emptyDir volumes with no values-driven configuration — this fork
+# never creates or references a PersistentVolumeClaim. See the "Storage"
+# section in README.md. (Plain comment, not `# --`: it documents the
+# Deployment's volumes in general, not the `valkey` key that happens to
+# follow it — helm-docs attaches `# --` comments to the next key.)
+
+valkey:
+  # -- Enable the bundled Valkey dependency (see Chart.yaml `dependencies`),
+  # required by `config.settings.server.limiter` and by
+  # `config.settings.server.public_instance`. Mutually exclusive with
+  # `externalValkey.*` below — set at most one of the two.
+  enabled: true
+  # -- Recommended to set explicitly (e.g. `vk`). Without it, this chart has to
+  # mirror the subchart's own `fullnameOverride`-less naming logic to build
+  # `SEARXNG_VALKEY_URL`, which works but is one more thing that can drift if
+  # the upstream subchart's helper ever changes. See README.md.
+  fullnameOverride: "searxng-valkey"
+  dataStorage:
+    # -- The limiter's Valkey data is disposable; never provision a PVC for it.
+    enabled: false
+  # -- Passed through to the Valkey subchart's own `valkeyConfig`. Disables
+  # RDB snapshotting; there's nothing worth persisting for an ephemeral
+  # rate-limiter/cache instance.
+  valkeyConfig: |
+    save ""
+  auth:
+    # -- Enable the Valkey subchart's ACL-based auth. When enabled, this fork
+    # only wires up credentials for the `default` ACL user (see
+    # `aclUsers.default` below) into `SEARXNG_VALKEY_URL` — multi-user ACLs,
+    # `usersExistingSecret`, or TLS need a manually-set
+    # `env.secretValues.SEARXNG_VALKEY_URL` or `externalValkey.urlSecret`
+    # instead.
+    enabled: false
+    # -- Example (uncomment to use). Password is inline/plaintext, matching
+    # what the Valkey subchart itself supports for `aclUsers`; `default` is
+    # mandatory once `auth.enabled: true`.
+    # aclUsers:
+    #   default:
+    #     permissions: "~* &* +@all"
+    #     password: "changeme"
+    resources:
+      requests:
+        cpu: 25m
+        memory: 64Mi
+      limits:
+        memory: 256Mi
+# @schema additionalProperties:true
+# This block is the values namespace of the `valkey` subchart dependency, not
+# a chart-local object — we only declare the handful of keys we override
+# (enabled, fullnameOverride, dataStorage.enabled, valkeyConfig, auth.*).
+# additionalProperties must stay true here or setting any other subchart key
+# (e.g. valkey.resources, valkey.replica) would fail schema validation.
+
+externalValkey:
+  # -- Literal `valkey://`/`valkeys://` URL. Mutually exclusive with
+  # `valkey.enabled` and with `urlSecret.name`.
+  url: ""
+  urlSecret:
+    # -- Name of an existing Secret containing the full Valkey URL. Takes
+    # precedence over `url` and over the bundled `valkey.enabled` subchart.
+    name: ""
+    # -- Key inside `urlSecret.name` holding the URL.
+    key: SEARXNG_VALKEY_URL
+
+probes:
+  startup:
+    # -- Enable the startup probe.
+    enabled: true
+    httpGet:
+      # -- Verified against SearXNG's `searx/webapp.py` (`@app.route('/healthz')`).
+      path: /healthz
+      port: http
+    initialDelaySeconds: 5
+    periodSeconds: 5
+    failureThreshold: 30
+    timeoutSeconds: 1
+  readiness:
+    enabled: true
+    httpGet:
+      path: /healthz
+      port: http
+    initialDelaySeconds: 5
+    periodSeconds: 10
+    failureThreshold: 6
+    timeoutSeconds: 1
+  liveness:
+    enabled: true
+    httpGet:
+      path: /healthz
+      port: http
+    initialDelaySeconds: 30
+    periodSeconds: 20
+    failureThreshold: 6
+    timeoutSeconds: 1
+
+# -- Extra volumes appended as-is to the pod spec. Do not use this to
+# redefine `config-runtime`, `cache`, or `tmp` — those volume names are
+# already declared by this chart's Deployment template, and a duplicate
+# `name` in `spec.volumes` makes the Kubernetes API reject the manifest.
+# `extraVolumes` is only for additional volumes under different names.
+extraVolumes: []
+# -- Extra volume mounts for the `searxng` container, paired with `extraVolumes`.
+extraVolumeMounts: []
+
+caCertificates:
+  # -- Name of an existing ConfigMap with extra CA certificates to trust.
+  existingConfigMap: ""
+  # -- Name of an existing Secret with extra CA certificates to trust.
+  existingSecret: ""
+  # -- Inline CA certificate files, keyed by filename.
+  files: {}
+  # -- Mount path for extra CA certificates inside the container.
+  mountPath: /usr/local/share/ca-certificates/chart-extra
+
+testConnection:
+  # -- Enable the `helm test` hook Pod.
+  enabled: true
+  image:
+    repository: docker.io/library/busybox
+    tag: "1.36"
+    pullPolicy: IfNotPresent
+  # -- Minimum resources for the test Pod, needed under a LimitRange or a
+  # Kyverno policy that requires requests on every container.
+  resources:
+    requests:
+      cpu: 10m
+      memory: 16Mi

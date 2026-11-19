@@ -1,0 +1,26 @@
+{{- range $raw := .Values.workers.pools }}
+{{- $pool := include "proxmox-talos-cluster.workerPool" (dict "root" $ "pool" $raw) | fromYaml }}
+{{- $ctx := dict "root" $ "pool" $pool }}
+---
+apiVersion: bootstrap.cluster.x-k8s.io/v1alpha3
+kind: TalosConfigTemplate
+metadata:
+  name: {{ include "proxmox-talos-cluster.workerTalosConfigTemplateName" $ctx }}
+  namespace: {{ $.Release.Namespace }}
+  labels:
+    {{- include "proxmox-talos-cluster.labels" $ | nindent 4 }}
+spec:
+  template:
+    spec:
+      generateType: worker
+      {{- with include "proxmox-talos-cluster.talosConfigCommon" $ | trim }}
+      {{- . | nindent 6 }}
+      {{- end }}
+      strategicPatches:
+        - |-
+          {{- include "proxmox-talos-cluster.workerTalosPatch" $ctx | nindent 10 }}
+        {{- range $.Values.workers.extraPatches }}
+        - |-
+          {{- . | nindent 10 }}
+        {{- end }}
+{{- end }}

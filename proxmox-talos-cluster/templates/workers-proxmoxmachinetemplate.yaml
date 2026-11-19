@@ -1,0 +1,16 @@
+{{- range $raw := .Values.workers.pools }}
+{{- $pool := include "proxmox-talos-cluster.workerPool" (dict "root" $ "pool" $raw) | fromYaml }}
+{{- $ctx := dict "root" $ "pool" $pool }}
+---
+apiVersion: infrastructure.cluster.x-k8s.io/v1alpha2
+kind: ProxmoxMachineTemplate
+metadata:
+  name: {{ include "proxmox-talos-cluster.workerMachineTemplateName" $ctx }}
+  namespace: {{ $.Release.Namespace }}
+  labels:
+    {{- include "proxmox-talos-cluster.labels" $ | nindent 4 }}
+spec:
+  template:
+    spec:
+      {{- include "proxmox-talos-cluster.workerMachineSpec" $ctx | trim | nindent 6 }}
+{{- end }}

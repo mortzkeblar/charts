@@ -1,0 +1,15 @@
+Cluster "{{ include "proxmox-talos-cluster.clusterName" . }}" declared in namespace {{ .Release.Namespace }}.
+
+Watch it come up:
+
+  clusterctl describe cluster {{ include "proxmox-talos-cluster.clusterName" . }} -n {{ .Release.Namespace }}
+
+Fetch the kubeconfig and talosconfig once the control plane is ready:
+
+  clusterctl get kubeconfig {{ include "proxmox-talos-cluster.clusterName" . }} -n {{ .Release.Namespace }} > kubeconfig
+  kubectl get secret {{ include "proxmox-talos-cluster.clusterName" . }}-talosconfig -n {{ .Release.Namespace }} -o jsonpath='{.data.talosconfig}' | base64 -d > talosconfig
+{{- if eq .Values.cluster.cni.name "none" }}
+
+No CNI is installed by Talos (cluster.cni.name=none): nodes stay NotReady
+until you install one (e.g. Cilium) in the workload cluster.
+{{- end }}

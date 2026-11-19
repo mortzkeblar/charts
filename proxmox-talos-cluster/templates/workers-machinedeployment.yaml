@@ -1,0 +1,64 @@
+{{- range $raw := .Values.workers.pools }}
+{{- $pool := include "proxmox-talos-cluster.workerPool" (dict "root" $ "pool" $raw) | fromYaml }}
+{{- $ctx := dict "root" $ "pool" $pool }}
+{{- $name := include "proxmox-talos-cluster.workerDeploymentName" $ctx }}
+{{- $deletion := $pool.deletion | default dict }}
+---
+apiVersion: cluster.x-k8s.io/v1beta2
+kind: MachineDeployment
+metadata:
+  name: {{ $name }}
+  namespace: {{ $.Release.Namespace }}
+  labels:
+    {{- include "proxmox-talos-cluster.labels" $ | nindent 4 }}
+  {{- if $pool.autoscaling.enabled }}
+  annotations:
+    cluster.x-k8s.io/cluster-api-autoscaler-node-group-min-size: {{ $pool.autoscaling.minSize | quote }}
+    cluster.x-k8s.io/cluster-api-autoscaler-node-group-max-size: {{ $pool.autoscaling.maxSize | quote }}
+  {{- end }}
+spec:
+  clusterName: {{ include "proxmox-talos-cluster.clusterName" $ }}
+  {{- if not $pool.autoscaling.enabled }}
+  replicas: {{ $pool.replicas }}
+  {{- end }}
+  {{- with $pool.rollout }}
+  rollout:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+  {{- with $deletion.order }}
+  deletion:
+    order: {{ . }}
+  {{- end }}
+  selector:
+    matchLabels:
+      cluster.x-k8s.io/cluster-name: {{ include "proxmox-talos-cluster.clusterName" $ }}
+      cluster.x-k8s.io/deployment-name: {{ $name }}
+  template:
+    metadata:
+      labels:
+        cluster.x-k8s.io/cluster-name: {{ include "proxmox-talos-cluster.clusterName" $ }}
+        cluster.x-k8s.io/deployment-name: {{ $name }}
+    spec:
+      clusterName: {{ include "proxmox-talos-cluster.clusterName" $ }}
+      version: v{{ $.Values.cluster.kubernetesVersion }}
+      {{- with $pool.minReadySeconds }}
+      minReadySeconds: {{ . }}
+      {{- end }}
+      {{- $timeouts := omit $deletion "order" }}
+      {{- range $k, $v := $timeouts }}
+      {{- if kindIs "invalid" $v }}{{ $_ := unset $timeouts $k }}{{ end }}
+      {{- end }}
+      {{- with $timeouts }}
+      deletion:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      bootstrap:
+        configRef:
+          apiGroup: bootstrap.cluster.x-k8s.io
+          kind: TalosConfigTemplate
+          name: {{ include "proxmox-talos-cluster.workerTalosConfigTemplateName" $ctx }}
+      infrastructureRef:
+        apiGroup: infrastructure.cluster.x-k8s.io
+        kind: ProxmoxMachineTemplate
+        name: {{ include "proxmox-talos-cluster.workerMachineTemplateName" $ctx }}
+{{- end }}

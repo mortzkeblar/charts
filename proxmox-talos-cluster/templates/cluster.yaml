@@ -1,0 +1,32 @@
+{{- $_ := required "cluster.controlPlaneEndpoint.host is required" .Values.cluster.controlPlaneEndpoint.host -}}
+apiVersion: cluster.x-k8s.io/v1beta2
+kind: Cluster
+metadata:
+  name: {{ include "proxmox-talos-cluster.clusterName" . }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "proxmox-talos-cluster.labels" . | nindent 4 }}
+spec:
+  {{- if .Values.cluster.paused }}
+  paused: true
+  {{- end }}
+  clusterNetwork:
+    pods:
+      cidrBlocks:
+        {{- toYaml .Values.cluster.network.pods.cidrBlocks | nindent 8 }}
+    {{- with .Values.cluster.network.services.cidrBlocks }}
+    services:
+      cidrBlocks:
+        {{- toYaml . | nindent 8 }}
+    {{- end }}
+    {{- with .Values.cluster.network.serviceDomain }}
+    serviceDomain: {{ . }}
+    {{- end }}
+  controlPlaneRef:
+    apiGroup: controlplane.cluster.x-k8s.io
+    kind: TalosControlPlane
+    name: {{ include "proxmox-talos-cluster.clusterName" . }}-control-plane
+  infrastructureRef:
+    apiGroup: infrastructure.cluster.x-k8s.io
+    kind: ProxmoxCluster
+    name: {{ include "proxmox-talos-cluster.clusterName" . }}

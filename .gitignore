@@ -1,0 +1,4 @@
+# Dependencias empaquetadas (se regeneran con helm dependency build)
+*/charts/*.tgz
+# Paquetes generados por helm package
+*.tgz

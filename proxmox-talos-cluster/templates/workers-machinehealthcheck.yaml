@@ -1,0 +1,45 @@
+{{- range $raw := .Values.workers.pools }}
+{{- $pool := include "proxmox-talos-cluster.workerPool" (dict "root" $ "pool" $raw) | fromYaml }}
+{{- $ctx := dict "root" $ "pool" $pool }}
+{{- $hc := $pool.healthCheck }}
+{{- if $hc.enabled }}
+{{- $name := include "proxmox-talos-cluster.workerDeploymentName" $ctx }}
+{{- $remediation := $hc.remediation | default dict }}
+---
+apiVersion: cluster.x-k8s.io/v1beta2
+kind: MachineHealthCheck
+metadata:
+  name: {{ $name }}
+  namespace: {{ $.Release.Namespace }}
+  labels:
+    {{- include "proxmox-talos-cluster.labels" $ | nindent 4 }}
+spec:
+  clusterName: {{ include "proxmox-talos-cluster.clusterName" $ }}
+  selector:
+    matchLabels:
+      cluster.x-k8s.io/cluster-name: {{ include "proxmox-talos-cluster.clusterName" $ }}
+      cluster.x-k8s.io/deployment-name: {{ $name }}
+  remediation:
+    triggerIf:
+      {{- with $remediation.triggerIf }}
+      {{- toYaml . | nindent 6 }}
+      {{- else }}
+      # Remediate only while at least one machine of the pool stays healthy
+      unhealthyInRange: "[1-{{ max 1 (sub (int (ternary $pool.autoscaling.maxSize $pool.replicas $pool.autoscaling.enabled)) 1) }}]"
+      {{- end }}
+    {{- with $remediation.templateRef }}
+    templateRef:
+      {{- toYaml . | nindent 6 }}
+    {{- end }}
+  checks:
+    nodeStartupTimeoutSeconds: {{ $hc.nodeStartupTimeoutSeconds }}
+    {{- with $hc.unhealthyNodeConditions }}
+    unhealthyNodeConditions:
+      {{- toYaml . | nindent 6 }}
+    {{- end }}
+    {{- with $hc.unhealthyMachineConditions }}
+    unhealthyMachineConditions:
+      {{- toYaml . | nindent 6 }}
+    {{- end }}
+{{- end }}
+{{- end }}

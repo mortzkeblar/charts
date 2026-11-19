@@ -1,0 +1,322 @@
+# Default values for proxmox-talos-cluster.
+#
+# The chart renders the Cluster API objects for one workload cluster:
+#
+#   Cluster ─┬─ ProxmoxCluster                  (infrastructure: Proxmox nodes, IP pool, DNS)
+#            ├─ TalosControlPlane ── ProxmoxMachineTemplate
+#            └─ MachineDeployment (per pool) ─┬─ ProxmoxMachineTemplate
+#                                             ├─ TalosConfigTemplate
+#                                             └─ MachineHealthCheck
+#
+# Requires a management cluster with CAPI core, CAPMOX (infrastructure-proxmox),
+# CABPT (bootstrap-talos) and CACPPT (control-plane-talos) installed.
+#
+# Values marked (required) have no usable default and must be set.
+
+# -- Override the chart name used to build resource names
+nameOverride: ""
+# -- Override the full name used to build resource names
+fullnameOverride: ""
+
+# ---------------------------------------------------------------------------
+# Cluster
+# ---------------------------------------------------------------------------
+cluster:
+  # -- Cluster name. Every CAPI object is named after it.
+  # Defaults to the release full name when empty. Changing it creates a new cluster.
+  name: ""
+  # -- Kubernetes version, without the leading "v"
+  kubernetesVersion: "1.36.0"
+  # -- Pause reconciliation of the whole cluster (useful during maintenance)
+  paused: false
+
+  controlPlaneEndpoint:
+    # -- (required) Address of the Kubernetes API. It must be outside the IP pool;
+    # Talos announces it as a VIP on the control plane nodes (controlPlane.vip).
+    host: ""
+    # -- Kubernetes API port
+    port: 6443
+
+  network:
+    pods:
+      # -- Pod network CIDRs
+      cidrBlocks:
+        - 10.244.0.0/16
+    services:
+      # -- Service network CIDRs. Empty uses the Talos default (10.96.0.0/12).
+      cidrBlocks: []
+    # -- Cluster DNS domain. Empty uses "cluster.local".
+    serviceDomain: ""
+
+  cni:
+    # -- CNI installed by Talos: "flannel", or "none" to bring your own (e.g. Cilium)
+    name: flannel
+
+  kubeProxy:
+    # -- Deploy kube-proxy. Disable it when the CNI replaces it (e.g. Cilium kube-proxy replacement).
+    enabled: true
+
+# ---------------------------------------------------------------------------
+# Proxmox infrastructure (ProxmoxCluster)
+# ---------------------------------------------------------------------------
+proxmox:
+  # -- Proxmox nodes machines may be placed on. Machines can narrow it (machine.allowedNodes).
+  allowedNodes:
+    - pve
+  # -- Secret with Proxmox API credentials for this cluster
+  # (keys: url, token, secret). Empty uses the CAPMOX controller credentials.
+  credentialsRef: {}
+  #   name: proxmox-credentials
+  #   namespace: ""
+
+  # -- (required) DNS servers configured on every machine
+  dnsServers: []
+
+  # -- (required) IPv4 pool CAPMOX assigns machine addresses from
+  ipv4Pool:
+    # -- Address ranges ("192.168.1.10-192.168.1.20") or CIDRs
+    addresses: []
+    # -- Default gateway
+    gateway: ""
+    # -- Network prefix length
+    prefix: 24
+    # -- Route metric for the default route (empty keeps the provider default)
+    metric: null
+
+  # -- Optional IPv6 pool (same fields as ipv4Pool). Enables dual stack on the primary NIC.
+  ipv6Pool: {}
+  #   addresses: ["2001:db8::10-2001:db8::50"]
+  #   gateway: "2001:db8::1"
+  #   prefix: 64
+
+  # -- CAPMOX scheduler hints, e.g. {memoryAdjustment: 100} to refuse memory overcommit
+  schedulerHints: {}
+
+# ---------------------------------------------------------------------------
+# Talos settings shared by every node
+# ---------------------------------------------------------------------------
+talos:
+  # -- Talos version the machine configuration is generated for (e.g. "v1.12").
+  # Empty uses the provider default; set it to match your Talos image.
+  version: ""
+  # -- Where node hostnames come from: "" (Talos default, from the IP),
+  # "MachineName" (CAPI Machine name) or "InfrastructureName" (Proxmox VM name)
+  hostnameSource: InfrastructureName
+  install:
+    # -- Disk Talos is installed to (scsi0 on Proxmox shows up as /dev/sda)
+    disk: /dev/sda
+    # -- Kernel arguments added on every node
+    extraKernelArgs: []
+  kubelet:
+    # -- Extra kubelet arguments on every node. With an external cloud controller
+    # manager (e.g. Talos CCM) set {cloud-provider: external}.
+    extraArgs: {}
+  # -- Time servers (empty keeps the Talos default)
+  timeServers: []
+
+# ---------------------------------------------------------------------------
+# Machine shape
+#
+# controlPlane.machine and workers.defaults.machine share this layout:
+#
+#   templateID         VMID of the Proxmox template to clone       (this or templateSelector)
+#   templateSelector   pick the template by Proxmox tags instead
+#   sourceNode         node holding the template
+#   allowedNodes       narrow proxmox.allowedNodes for these machines
+#   storage            target storage for the clone (empty: same as the template)
+#   pool               Proxmox resource pool for the VMs
+#   tags               Proxmox tags added to the VMs
+#   cpu, memoryMiB, disk, clone, network, vmIDRange, checks
+# ---------------------------------------------------------------------------
+
+# ---------------------------------------------------------------------------
+# Control plane (TalosControlPlane)
+# ---------------------------------------------------------------------------
+controlPlane:
+  # -- Number of control plane machines. Use an odd number (1 for dev, 3 for HA).
+  replicas: 3
+
+  machine:
+    # -- (required, or templateSelector) VMID of the Proxmox template to clone
+    templateID: null
+    # -- Select the template by tags, e.g. {matchTags: [talos, v1.12]}
+    templateSelector: {}
+    sourceNode: pve
+    allowedNodes: []
+    storage: ""
+    pool: ""
+    tags: []
+    cpu:
+      cores: 2
+      sockets: 1
+    # -- Talos recommends at least 4 GiB for control plane nodes
+    memoryMiB: 4096
+    disk:
+      # -- Boot disk device on the template
+      device: scsi0
+      sizeGb: 20
+    clone:
+      # -- Full clone (true) or linked clone (false, template storage must support it)
+      full: true
+      # -- Disk format for full clones: raw, qcow2 or vmdk. Empty keeps the storage default.
+      format: ""
+    network:
+      bridge: vmbr0
+      # -- VLAN tag (null for untagged)
+      vlan: null
+      model: virtio
+      # -- Interface MTU (null keeps the default)
+      mtu: null
+      # -- Extra NICs, in CAPMOX networkDevices format (net0 is the primary one)
+      additionalDevices: []
+    # -- VMIDs CAPMOX may assign, e.g. {start: 1000, end: 1099}.
+    # Empty lets Proxmox pick the next free VMID.
+    vmIDRange: {}
+    checks:
+      # -- Skip waiting for the QEMU guest agent (set it if the Talos image lacks
+      # the qemu-guest-agent extension)
+      skipQemuGuestAgent: false
+
+  vip:
+    # -- Announce cluster.controlPlaneEndpoint.host as a shared VIP
+    enabled: true
+    # -- Interface the VIP is bound to. Empty selects the first physical NIC.
+    interface: ""
+
+  # -- Kernel arguments added on control plane nodes only
+  extraKernelArgs: []
+
+  # -- Talos API access from inside the cluster (needed e.g. by Talos CCM)
+  talosAPIAccess:
+    enabled: false
+    allowedRoles:
+      - os:reader
+    allowedKubernetesNamespaces:
+      - kube-system
+
+  # -- OIDC authentication for the Kubernetes API server
+  oidc:
+    enabled: false
+    # -- e.g. https://idp.example.com/realms/main
+    issuerURL: ""
+    clientID: ""
+    usernameClaim: preferred_username
+    usernamePrefix: "oidc:"
+    groupsClaim: groups
+    groupsPrefix: "oidc:"
+
+  apiServer:
+    # -- Extra kube-apiserver arguments (merged over the OIDC ones)
+    extraArgs: {}
+
+  # -- How control plane machines are replaced on changes, e.g.
+  # {type: RollingUpdate, rollingUpdate: {maxSurge: 1}} or {type: OnDelete}
+  rolloutStrategy: {}
+
+  # -- Extra Talos strategic merge patches for control plane nodes (YAML strings)
+  extraPatches: []
+
+# ---------------------------------------------------------------------------
+# Workers (one MachineDeployment per pool)
+# ---------------------------------------------------------------------------
+workers:
+  # -- Defaults for every pool. Each entry in `pools` is deep-merged over them,
+  # so a pool only sets what differs (lists are replaced, not merged).
+  defaults:
+    replicas: 2
+
+    machine:
+      # -- (required, or templateSelector) VMID of the Proxmox template to clone
+      templateID: null
+      templateSelector: {}
+      sourceNode: pve
+      allowedNodes: []
+      storage: ""
+      pool: ""
+      tags: []
+      cpu:
+        cores: 2
+        sockets: 1
+      memoryMiB: 4096
+      disk:
+        device: scsi0
+        sizeGb: 20
+      clone:
+        full: true
+        format: ""
+      network:
+        bridge: vmbr0
+        vlan: null
+        model: virtio
+        mtu: null
+        additionalDevices: []
+      vmIDRange: {}
+      checks:
+        skipQemuGuestAgent: false
+
+    # -- Kubernetes node labels
+    nodeLabels: {}
+    # -- Kubernetes node taints, Talos format: {key: "value:Effect"}
+    nodeTaints: {}
+
+    # -- Cluster Autoscaler (clusterapi provider). When enabled, replicas is not
+    # rendered and the autoscaler owns the pool size between minSize and maxSize.
+    autoscaling:
+      enabled: false
+      minSize: 1
+      maxSize: 3
+
+    # -- Rollout strategy, e.g. {strategy: {type: RollingUpdate,
+    # rollingUpdate: {maxSurge: 1, maxUnavailable: 0}}}. Empty uses the CAPI default.
+    rollout: {}
+
+    # -- Seconds a new node must be Ready before it counts as available
+    minReadySeconds: 0
+
+    deletion:
+      # -- Which machines go first when scaling down: Random, Newest or Oldest
+      order: Oldest
+      # -- Max time to drain a node before deleting it (0 waits forever)
+      nodeDrainTimeoutSeconds: 600
+      # -- Max time to wait for volumes to detach (0 waits forever)
+      nodeVolumeDetachTimeoutSeconds: 600
+      # -- Max time to wait for the Node object deletion (null keeps the CAPI default)
+      nodeDeletionTimeoutSeconds: null
+
+    # -- MachineHealthCheck: replaces machines whose node never joins or turns unhealthy
+    healthCheck:
+      enabled: true
+      # -- Time a new machine has to become a Ready node
+      nodeStartupTimeoutSeconds: 600
+      # -- Node conditions that mark a machine unhealthy after timeoutSeconds
+      unhealthyNodeConditions:
+        - type: Ready
+          status: Unknown
+          timeoutSeconds: 300
+        - type: Ready
+          status: "False"
+          timeoutSeconds: 300
+      # -- Machine conditions that mark a machine unhealthy, e.g.
+      # [{type: NodeHealthy, status: "False", timeoutSeconds: 600}]
+      unhealthyMachineConditions: []
+      remediation:
+        # -- When remediation may run, e.g. {unhealthyLessThanOrEqualTo: "40%"}
+        # or {unhealthyInRange: "[1-2]"}. Empty: only while at least one machine
+        # of the pool is still healthy.
+        triggerIf: {}
+        # -- External remediation template (instead of deleting the machine)
+        templateRef: {}
+
+  # Talos settings for every worker node
+  # -- Kernel sysctls, e.g. {"vm.nr_hugepages": "1024"}
+  sysctls: {}
+  # -- Kernel modules to load, e.g. [{name: nvme_tcp}]
+  kernelModules: []
+  # -- Extra kubelet mounts (Talos machine.kubelet.extraMounts)
+  kubeletExtraMounts: []
+  # -- Extra Talos strategic merge patches (YAML strings)
+  extraPatches: []
+
+  # -- Worker pools, merged over workers.defaults
+  pools:
+    - name: default

@@ -1,0 +1,140 @@
+# Example: homelab cluster on a tagged VLAN with Cilium as CNI (no kube-proxy),
+# Talos CCM, Longhorn V2 storage, OIDC for the API server and two worker pools.
+#
+#   helm template my-cluster . -f examples/homelab.yaml
+
+cluster:
+  name: homelab
+  controlPlaneEndpoint:
+    host: 192.168.10.10
+  cni:
+    name: none
+  kubeProxy:
+    enabled: false
+
+proxmox:
+  allowedNodes:
+    - pve1
+    - pve2
+  dnsServers:
+    - 192.168.10.1
+  ipv4Pool:
+    addresses:
+      - 192.168.10.11-192.168.10.29
+    gateway: 192.168.10.1
+    prefix: 24
+
+talos:
+  version: v1.12
+  install:
+    extraKernelArgs:
+      - net.ifnames=0
+  # Talos CCM sets the providerID; the serving-cert approver signs kubelet certs
+  kubelet:
+    extraArgs:
+      cloud-provider: external
+      rotate-server-certificates: "true"
+  timeServers:
+    - 192.168.10.1
+
+controlPlane:
+  replicas: 3
+  machine:
+    templateSelector:
+      matchTags:
+        - talos-v1.12
+    sourceNode: pve1
+    network:
+      bridge: vmbr1
+      vlan: 10
+    vmIDRange:
+      start: 1000
+      end: 1009
+  vip:
+    interface: eth0
+  extraKernelArgs:
+    - console=ttyS0,115200n8
+  talosAPIAccess:
+    enabled: true
+  oidc:
+    enabled: true
+    issuerURL: https://idp.example.com/realms/main
+    clientID: homelab-cluster
+
+workers:
+  defaults:
+    machine:
+      templateSelector:
+        matchTags:
+          - talos-v1.12
+      sourceNode: pve1
+      memoryMiB: 8192
+      network:
+        bridge: vmbr1
+        vlan: 10
+    nodeLabels:
+      bgp-enabled: "true"
+
+  # Longhorn V2 data engine (SPDK) requirements
+  sysctls:
+    vm.nr_hugepages: "1024"
+  kernelModules:
+    - name: nvme_tcp
+    - name: vfio_pci
+    - name: uio_pci_generic
+  kubeletExtraMounts:
+    - destination: /var/mnt/longhorn
+      type: bind
+      source: /var/mnt/longhorn
+      options:
+        - bind
+        - rshared
+        - rw
+
+  extraPatches:
+    - |-
+      apiVersion: v1alpha1
+      kind: UserVolumeConfig
+      name: longhorn
+      provisioning:
+        diskSelector:
+          match: disk.size > 50u * GB && !system_disk
+        minSize: 60GiB
+        grow: true
+      filesystem:
+        type: xfs
+
+  pools:
+    - name: general
+      machine:
+        vmIDRange:
+          start: 1010
+          end: 1029
+      autoscaling:
+        enabled: true
+        minSize: 2
+        maxSize: 6
+
+    # Dedicated, tainted pool with bigger machines on the second node
+    - name: ai
+      replicas: 1
+      machine:
+        sourceNode: pve2
+        allowedNodes:
+          - pve2
+        cpu:
+          cores: 8
+        memoryMiB: 16384
+        disk:
+          sizeGb: 50
+        vmIDRange:
+          start: 1030
+          end: 1039
+      # Maps are merged with workers.defaults, so bgp-enabled is kept
+      nodeLabels:
+        workload: ai
+      nodeTaints:
+        dedicated: ai:NoSchedule
+      healthCheck:
+        # GPU nodes take longer to come up
+        nodeStartupTimeoutSeconds: 1200

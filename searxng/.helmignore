@@ -5,3 +5,5 @@
 *.swp
 *.bak
 *.tmp
+# CI values are not part of the package
+ci/

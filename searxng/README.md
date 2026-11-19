@@ -39,14 +39,16 @@ section below for the full list of changes against upstream, and
 ## Install with Helm
 
 ```bash
-helm dependency update ./charts/searxng
-helm upgrade --install searxng ./charts/searxng --namespace search --create-namespace
+helm upgrade --install searxng oci://ghcr.io/mortzkeblar/charts/searxng \
+  --version 0.1.0 --namespace search --create-namespace \
+  --set secret.create=true
 ```
 
-Render manifests locally:
+From a checkout of this repository:
 
 ```bash
-helm template searxng ./charts/searxng
+helm dependency build ./searxng
+helm template searxng ./searxng --set secret.create=true
 ```
 
 ## Main values
@@ -357,6 +359,11 @@ Changes against
   as the Deployment, `automountServiceAccountToken: false`, and minimal
   `resources` — it was previously rejected outright under PSS `restricted`
   admission. Its probe target also moved from `/` to `/healthz`.
+- `gateway` (HTTPRoute) is disabled by default with a generic `parentRefs` and no
+  hostnames, like `ingress`.
+- Added optional NetworkPolicies (`networkPolicy.*`): SearXNG accepts traffic only
+  on its HTTP port (optionally from given peers) with optional egress lockdown, and
+  the bundled Valkey accepts connections only from SearXNG.
 
 ## Attribution
 

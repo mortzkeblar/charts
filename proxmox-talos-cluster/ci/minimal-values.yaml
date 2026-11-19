@@ -1,0 +1,16 @@
+# Smallest valid configuration (used by CI)
+cluster:
+  controlPlaneEndpoint:
+    host: 192.168.1.10
+proxmox:
+  dnsServers: [192.168.1.1]
+  ipv4Pool:
+    addresses: [192.168.1.11-192.168.1.30]
+    gateway: 192.168.1.1
+controlPlane:
+  machine:
+    templateID: 100
+workers:
+  defaults:
+    machine:
+      templateID: 100

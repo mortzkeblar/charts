@@ -5,12 +5,15 @@ type: application
 version: 0.1.0
 appVersion: "2026.11.17-b99cf7496"
 kubeVersion: ">=1.27.0-0"
-home: https://docs.searxng.org/
+home: https://github.com/mortzkeblar/charts/tree/main/searxng
 icon: https://docs.searxng.org/_static/searxng-wordmark.svg
 sources:
+  - https://github.com/mortzkeblar/charts
   - https://github.com/searxng/searxng
   - https://github.com/techpipe-io/searxng-helm-chart
-  - https://github.com/TODO/TODO # TODO: point at this fork's own repo once it has one
+maintainers:
+  - name: mortzkeblar
+    url: https://github.com/mortzkeblar
 keywords:
   - searxng
   - search
@@ -30,12 +33,11 @@ annotations:
     - name: searxng
       image: docker.io/searxng/searxng:2026.11.17-b99cf7496
   artifacthub.io/links: |
+    - name: chart source
+      url: https://github.com/mortzkeblar/charts/tree/main/searxng
     - name: app source
       url: https://github.com/searxng/searxng
-    - name: chart source
+    - name: upstream chart
       url: https://github.com/techpipe-io/searxng-helm-chart
     - name: documentation
       url: https://docs.searxng.org/
-    - name: support
-      url: https://github.com/techpipe-io/searxng-helm-chart/issues
-  artifacthub.io/changes: ""

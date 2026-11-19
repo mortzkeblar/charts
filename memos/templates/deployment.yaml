@@ -8,42 +8,47 @@ spec:
   {{- if not .Values.autoscaling.enabled }}
   replicas: {{ .Values.replicaCount }}
   {{- end }}
+  {{- if and .Values.persistence.enabled (eq .Values.persistence.accessMode "ReadWriteOnce") }}
+  # A ReadWriteOnce volume cannot be mounted by the old and new pod at once
+  strategy:
+    type: Recreate
+  {{- end }}
   selector:
     matchLabels:
       {{- include "memos.selectorLabels" . | nindent 6 }}
   template:
     metadata:
-      {{- with .Values.podAnnotations }}
       annotations:
+        {{- if .Values.config.secretEnv }}
+        checksum/secret: {{ include (print $.Template.BasePath "/secret.yaml") . | sha256sum }}
+        {{- end }}
+        {{- with .Values.podAnnotations }}
         {{- toYaml . | nindent 8 }}
-      {{- end }}
+        {{- end }}
       labels:
         {{- include "memos.selectorLabels" . | nindent 8 }}
+        {{- with .Values.podLabels }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
     spec:
       {{- with .Values.imagePullSecrets }}
       imagePullSecrets:
         {{- toYaml . | nindent 8 }}
       {{- end }}
       serviceAccountName: {{ include "memos.serviceAccountName" . }}
+      automountServiceAccountToken: {{ .Values.serviceAccount.automount }}
+      enableServiceLinks: {{ .Values.enableServiceLinks }}
       securityContext:
         {{- toYaml .Values.podSecurityContext | nindent 8 }}
-      volumes:
-        - name: memos-data
-        {{- if .Values.persistence.enabled }}
-          persistentVolumeClaim:
-            claimName: {{ .Values.persistence.existPersistClaim | default (include "memos.fullname" .) }}
-        {{- else }}
-          emptyDir: {}
-        {{ end }}
       containers:
         - name: {{ .Chart.Name }}
           securityContext:
             {{- toYaml .Values.securityContext | nindent 12 }}
-          image: "{{ .Values.image.repo}}/{{ .Values.image.imageName }}:{{ .Values.image.tag | default .Chart.AppVersion }}"
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag | default .Chart.AppVersion }}"
           imagePullPolicy: {{ .Values.image.pullPolicy }}
           ports:
             - name: http
-              containerPort: 5230
+              containerPort: {{ include "memos.containerPort" . }}
               protocol: TCP
           livenessProbe:
             httpGet:
@@ -53,16 +58,36 @@ spec:
             httpGet:
               path: /
               port: http
-          volumeMounts:
-            - name: memos-data
-              mountPath: /var/opt/memos
-          # avoid * cannot parse 'Port' as int: strconv.ParseInt: parsing "tcp://10.233.40.219:5230": invalid syntax
           env:
+            # Set explicitly: Kubernetes injects MEMOS_PORT=tcp://... for a Service named "memos"
             - name: MEMOS_PORT
-              value: "{{ .Values.service.port }}"
-            {{- include "memos.listEnvars" . | indent 12 }}
+              value: {{ include "memos.containerPort" . | quote }}
+            {{- with include "memos.listEnvars" . | trim }}
+            {{- . | nindent 12 }}
+            {{- end }}
+          {{- with .Values.config.existingSecret }}
+          envFrom:
+            - secretRef:
+                name: {{ . }}
+          {{- end }}
+          volumeMounts:
+            - name: data
+              mountPath: /var/opt/memos
+            # Writable scratch space, the root filesystem is read-only
+            - name: tmp
+              mountPath: /tmp
           resources:
             {{- toYaml .Values.resources | nindent 12 }}
+      volumes:
+        - name: data
+          {{- if .Values.persistence.enabled }}
+          persistentVolumeClaim:
+            claimName: {{ .Values.persistence.existingClaim | default (include "memos.fullname" .) }}
+          {{- else }}
+          emptyDir: {}
+          {{- end }}
+        - name: tmp
+          emptyDir: {}
       {{- with .Values.nodeSelector }}
       nodeSelector:
         {{- toYaml . | nindent 8 }}
@@ -74,4 +99,4 @@ spec:
       {{- with .Values.tolerations }}
       tolerations:
         {{- toYaml . | nindent 8 }}
-      {{- end}}
+      {{- end }}

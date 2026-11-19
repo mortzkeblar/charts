@@ -1,119 +1,173 @@
 # Default values for memos.
-# This is a YAML-formatted file.
-# Declare variables to be passed into your templates.
 
+# -- Number of replicas. Keep 1 with SQLite (the default driver); several
+# replicas need an external database (MEMOS_DRIVER=postgres or mysql).
 replicaCount: 1
 
 image:
-  repo: ghcr.io
-  imageName: usememos/memos
+  # -- Image repository
+  repository: ghcr.io/usememos/memos
+  # -- Image pull policy
   pullPolicy: IfNotPresent
-  # Overrides the image tag whose default is the chart appVersion.
-  tag: "latest"
+  # -- Image tag. Defaults to the chart appVersion.
+  tag: ""
 
+# -- Secrets for pulling images from a private registry
 imagePullSecrets: []
+# -- Override the chart name used in resource names
 nameOverride: ""
+# -- Override the full resource name
 fullnameOverride: ""
 
-config: {}
+config:
+  # -- Plain environment variables, e.g. {MEMOS_DRIVER: postgres, MEMOS_INSTANCE_URL: https://memos.example.com}.
+  # See https://usememos.com/docs/configuration for the full list.
+  env: {}
+  # -- Sensitive environment variables (e.g. {MEMOS_DSN: "postgresql://..."}),
+  # stored in a Secret created by the chart. Prefer existingSecret for real credentials.
+  secretEnv: {}
+  # -- Existing Secret whose keys are loaded as environment variables
+  # (e.g. a Secret with a MEMOS_DSN key). Keeps credentials out of the values.
+  existingSecret: ""
 
 persistence:
-  ## 如果enabled 为False, 会使用emptyDir, Pod 重建后数据可能丢失, 建议使用持久卷
-  ## If enabled is False, emptyDir will be used, data may be lost after Pod rebuild, it is recommended to use persistent volume
-  enabled: false
-  storageClass: "local"
-  existPersistClaim: ""
+  # -- Store data in a PersistentVolumeClaim. When false an emptyDir is used
+  # and data is lost when the pod is recreated.
+  enabled: true
+  # -- Use an existing PVC instead of creating one
+  existingClaim: ""
+  # -- StorageClass for the new PVC. Empty uses the cluster default.
+  storageClass: ""
+  # -- Access mode for the new PVC
   accessMode: ReadWriteOnce
+  # -- Size of the new PVC
   size: 10Gi
 
 serviceAccount:
-  # Specifies whether a service account should be created
+  # -- Create a ServiceAccount for the pod
   create: true
-  # Automatically mount a ServiceAccount's API credentials?
-  # Set to false for improved security unless your application needs Kubernetes API access
+  # -- Mount the ServiceAccount token. Memos does not use the Kubernetes API.
   automount: false
-  # Annotations to add to the service account
+  # -- Annotations for the ServiceAccount
   annotations: {}
-  # The name of the service account to use.
-  # If not set and create is true, a name is generated using the fullname template
+  # -- ServiceAccount name. Generated from the full name when empty.
   name: ""
 
+# -- Annotations for the pod
 podAnnotations: {}
+# -- Extra labels for the pod
+podLabels: {}
 
+# -- Pod security context. Compliant with Pod Security Standards "restricted".
+# UID/GID 10001 is the non-root user of the memos image.
 podSecurityContext:
-  fsGroup: 1000
   runAsNonRoot: true
-  runAsUser: 1000
+  runAsUser: 10001
+  runAsGroup: 10001
+  fsGroup: 10001
+  # -- Only chown the volume when its root has the wrong owner (faster restarts)
+  fsGroupChangePolicy: OnRootMismatch
+  seccompProfile:
+    type: RuntimeDefault
 
+# -- Container security context
 securityContext:
   allowPrivilegeEscalation: false
+  readOnlyRootFilesystem: true
   capabilities:
     drop:
-    - ALL
-  readOnlyRootFilesystem: false
-  runAsNonRoot: true
-  runAsUser: 1000
+      - ALL
+
+# -- Inject Service environment variables (FOO_SERVICE_HOST, ...) into the pod.
+# Memos does not need them.
+enableServiceLinks: false
 
 service:
+  # -- Service type
   type: ClusterIP
+  # -- Service port
   port: 5230
 
 ingress:
+  # -- Expose memos through an Ingress
   enabled: false
+  # -- IngressClass name
   className: ""
-  annotations:
-    {}
-    # kubernetes.io/ingress.class: nginx
-    # kubernetes.io/tls-acme: "true"
-    # traefik.ingress.kubernetes.io/router.middlewares: app-chain-authelia-auth@kubernetescrd
+  # -- Ingress annotations
+  annotations: {}
+  # -- Ingress hosts and paths
   hosts:
-    - host: chart-example.local
+    - host: memos.example.com
       paths:
         - path: /
           pathType: Prefix
+  # -- Ingress TLS, e.g. [{secretName: memos-tls, hosts: [memos.example.com]}]
   tls: []
-  #  - secretName: chart-example-tls
-  #    hosts:
-  #      - chart-example.local
 
 httpRoute:
+  # -- Expose memos through a Gateway API HTTPRoute
   enabled: false
+  # -- HTTPRoute annotations
   annotations: {}
+  # -- Gateways the route attaches to
   parentRefs:
-  - name: gateway
-    sectionName: http
-    # namespace: default
+    - name: gateway
+      # sectionName: https
+      # namespace: gateway-system
+  # -- Hostnames matched by the route
   hostnames:
-  - chart-example.local
-  # List of rules and filters applied.
+    - memos.example.com
+  # -- Route rules. backendRefs to the memos Service are added automatically.
   rules:
-  - matches:
-    - path:
-        type: PathPrefix
-        value: /
-  tls:
-    enabled: false
-    # certificateRefs:
-    #   - name: silverbullet-tls
-    #     kind: Secret
+    - matches:
+        - path:
+            type: PathPrefix
+            value: /
 
+# -- Container resources
 resources:
-  limits:
-    cpu: 500m
-    memory: 512Mi
   requests:
-    cpu: 100m
+    cpu: 50m
     memory: 128Mi
+  limits:
+    memory: 512Mi
 
 autoscaling:
+  # -- Enable a HorizontalPodAutoscaler. Only with an external database.
   enabled: false
   minReplicas: 1
-  maxReplicas: 100
+  maxReplicas: 3
   targetCPUUtilizationPercentage: 80
   # targetMemoryUtilizationPercentage: 80
 
+networkPolicy:
+  # -- Create a NetworkPolicy for the memos pods
+  enabled: false
+  # -- Peers allowed to reach memos on its HTTP port (NetworkPolicyPeer list),
+  # e.g. the namespace of your ingress controller or gateway. Empty allows any source.
+  ingressFrom: []
+  #  - namespaceSelector:
+  #      matchLabels:
+  #        kubernetes.io/metadata.name: gateway-system
+  egress:
+    # -- Restrict outgoing traffic. Memos needs egress for an external database,
+    # S3 storage, webhooks and link previews, so this is off by default.
+    enabled: false
+    # -- Allow DNS to kube-dns when egress is restricted
+    allowDNS: true
+    # -- Extra egress rules (NetworkPolicyEgressRule list), e.g. to the database
+    rules: []
+    #  - to:
+    #      - podSelector:
+    #          matchLabels:
+    #            app.kubernetes.io/name: postgresql
+    #    ports:
+    #      - port: 5432
+    #        protocol: TCP
+
+# -- Node selector for the pod
 nodeSelector: {}
-
+# -- Tolerations for the pod
 tolerations: []
-
+# -- Affinity rules for the pod
 affinity: {}

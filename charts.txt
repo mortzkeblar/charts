@@ -1,0 +1,4 @@
+# Charts built and published by CI (one directory per line).
+# memos is left out until its upstream license is sorted out.
+proxmox-talos-cluster
+searxng

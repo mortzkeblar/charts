@@ -11,3 +11,4 @@
 .vscode/
 # Example values are documentation, not part of the package
 examples/
+ci/
